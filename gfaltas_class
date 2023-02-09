@@ -1,0 +1,681 @@
+<?php
+include_once '/var/www/html/sigapfoun/public/controllers/crud.php';
+include_once '/var/www/html/sigapfoun/public/access_control/connection.php';
+include_once '/var/www/html/sigapfoun/config/config.php';
+
+class GestaoFaltas extends gestaoTabelas
+{
+    protected $conn = null;
+    protected $db_pgconnect = null;
+    public  $PSQLHOST;
+    public  $PSQLUSER;
+    public  $PSQLDB;
+    public $PSQLPW;
+    public function __construct($PSQLHOST, $PSQLUSER, $PSQLPW, $PSQLDB)
+    {
+        $connnec = new connection($PSQLHOST, $PSQLUSER, $PSQLPW, $PSQLDB);
+        $this->conn = $connnec->open();
+        $this->db_pgconnect = $connnec->open_pgconnect();
+    }
+
+    public function verficar_data_faltas($tabela, $data_inicio, $id_identificacao)
+    {
+        $sql = "SELECT *
+            FROM $tabela
+            WHERE daterange(data_inicio_de_falta, data_fim_de_falta) @> '$data_inicio'::DATE
+            AND id_identificacao = '$id_identificacao'";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $data_sobrepor = $stmt->rowCount();
+        
+        if ($data_sobrepor == 0) {
+            return true;
+        } else {
+            return false;
+        }
+        
+    }
+
+    public function set_dados_busca($table, $thead, $select, $where, $and_condicao, $page)
+    {
+        $sql = "SELECT $select FROM $table WHERE $where $and_condicao";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $dados_retorno =  $stmt->fetchAll();
+        $header = explode(',', $thead);
+        $body = explode(',', $select);
+        if ($stmt->rowCount() > 0) {
+            foreach ($dados_retorno as $dados) {
+                $tabela = '<table id="" class="table table-row-bordered gy-5"><thead><tr class="fw-bolder text-muted">';
+                foreach ($header as $th) {
+                    $tabela .=  '<th>' . $th . '</th>';
+                }
+                $tabela .= '</tr></thead>';
+                $tabela .= '<tbody>';
+                $tabela .= '<tr class="clickable-row" data-href="?page=' . $page . '&id_identificacao=' . $dados[$body[0]] . '">';
+                foreach ($body as $col) {
+                    if ($body[0] != $col) {
+                        $tabela .=  '<td><a href="#" class="text-dark fw-bolder text-hover-primary d-block fs-6">' . $dados[$col] . '</a> </td>';
+                    }
+                }
+                $tabela .= '</tr></tbody></table>';
+                $tabela .= '<script>
+                                jQuery(document).ready(function($) {
+                                    $(".clickable-row").click(function() {
+                                        window.location = $(this).data("href");
+                                    });
+                                });
+                            </script>';
+                echo $tabela;
+            }
+        } else {
+            echo '<div class="col-md-12">
+            <div class="alert alert-dismissible bg-danger d-flex flex-column flex-sm-row p-5 mb-10">
+                <i class="bi bi-exclamation-triangle fs-3x me-6" style="color:#ffffff"></i>
+                <div class="d-flex flex-column text-light pe-0 pe-sm-10">
+                    <h4 class="mb-2 light">Atensaun</h4>
+                    <span>Funsionario refere la ejiste</span>
+                </div>
+            </div>
+        </div>';
+        }
+    }
+
+    public function soma_dias_falta($id_funcionario)
+    {
+
+        $sql = "SELECT SUM(dias) AS value_sum FROM view_gestao_das_faltas where id_identificacao = '$id_funcionario' ";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetch();
+        
+        echo $resultado['value_sum'];
+    }
+    
+    public function soma_dias_falta_id($id_funcionario)
+    {
+        if (empty($_POST['mes_falta'])) {
+            $sql = "SELECT SUM(dias::numeric) as dias 
+        from view_gestao_das_faltas WHERE EXTRACT('year' from data_inicio_de_falta)=".$_POST['ano_falta']." and id_identificacao = '$id_funcionario'";
+            
+        }else{
+            $sql = "SELECT SUM(dias::numeric) as dias 
+            from view_gestao_das_faltas WHERE EXTRACT('month' from  data_inicio_de_falta) = ".$_POST['mes_falta']." and 
+            EXTRACT('year' from data_inicio_de_falta)=".$_POST['ano_falta']." and id_identificacao = '$id_funcionario'";
+        }
+    
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetch();
+        
+        return $resultado['dias'];
+    }
+
+    public function get_faltas_30_dias($mes, $ano, $instituicao_selecionado)
+    {
+        
+        if (empty($mes)) {
+            $sql = "SELECT id_sigap, id_identificacao, nome_pessoal, sexo, instituicao, SUM(dias) as dias, sum(dias_uteis::numeric) as dias_uteis, categoria_momento_falta FROM view_gestao_das_faltas  WHERE EXTRACT('year' from data_inicio_de_falta)= $ano AND instituicao LIKE '%$instituicao_selecionado%' 
+            and id_tipo_faltas = '00000000-0000-0000-0000-000000000003' 
+            GROUP BY id_sigap, id_identificacao, nome_pessoal, sexo, instituicao, categoria_momento_falta order by dias_uteis DESC ";
+        }else{
+            $sql = "SELECT id_sigap, id_identificacao, nome_pessoal, sexo, instituicao, SUM(dias) as dias, sum(dias_uteis::numeric) as dias_uteis, categoria_momento_falta FROM view_gestao_das_faltas  WHERE EXTRACT('year' from data_inicio_de_falta)= $ano AND  EXTRACT('month' from data_inicio_de_falta)= $mes AND instituicao LIKE '%$instituicao_selecionado%' 
+            and id_tipo_faltas = '00000000-0000-0000-0000-000000000003' 
+            GROUP BY id_sigap, id_identificacao, nome_pessoal, sexo, instituicao, categoria_momento_falta order by dias_uteis DESC ";
+        }
+
+        // var_dump($sql);
+        // die;
+        
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetchAll();
+
+        return $resultado;
+    }
+   
+    public function set_faltas_30_dias($id_funcionario, $mes, $ano, $instituicao)
+    {
+        $faltas = new GestaoFaltas(PSQLHOST, PSQLUSER, PSQLPW, PSQLDB);
+        $verificar = $faltas->verificar_ficha_nao_exercicios_faltas1($id_funcionario);
+
+        // var_dump($verificar);
+        // die;
+
+        // if ($verificar == true) {
+            pg_query($this->db_pgconnect, 'SET search_path TO arquivos');
+            $t = time();
+            $arr_ano_mes = array($ano, $mes);
+            $a_date = implode("-",$arr_ano_mes);
+            
+            if (!empty($mes)) {
+                $data_inicio_nao_execicio = date("Y-m-t", strtotime($a_date));
+            } elseif (empty($mes)) {
+            
+                $data_inicio_nao_execicio = $ano . "-12-31";
+            } 
+    
+            $arr = array($mes, $ano,$instituicao);
+            $mes_ano_instituicao =  implode("falta_",$arr);
+
+            $inserido_por = $_SESSION['nome_usuario'] . "(" . $_SESSION['numero_sigap'] . ")";
+            
+            $sql = "INSERT INTO sigap_foun.gfuncao_ficha_nao_exercicio(id_identificacao, id_relacao_juridico_emprego,  id_tipo_alteracao_ficha,  id_motivo_nao_exercicio,  data_inicio_nao_exercicio,  fnao_exercicio_inserido_em,  fnao_exercicio_inserido_por, observacao)
+                                                        
+            VALUES ('$id_funcionario','e807ce72-5264-4dd6-aae5-cc4f5c46edd6','dac1f55f-e517-4628-9aec-893bd1adc12e','45020ea3-3043-434d-b244-c1114a532e7a', '$data_inicio_nao_execicio', $t, '$inserido_por', '$mes_ano_instituicao');
+            UPDATE sigap_foun.g_identificacao_pessoal SET controlo_ativo_identificacao = 'Não Exercício' WHERE id_identificacao = '$id_funcionario';
+            
+            DELETE FROM sigap_foun.gfuncao_ficha_nao_exercicio WHERE id_identificacao = '$id_funcionario' AND id_motivo_nao_exercicio = '45020ea3-3043-434d-b244-c1114a532e7a' AND fnao_exercicio_inserido_em <> $t AND observacao LIKE 'falta_%' ";
+
+            pg_query($this->db_pgconnect, $sql);
+        // }
+
+       if(!empty($_POST['instituicao_selecionado'])) {
+            $inst =  "&instituicao=" . $instituicao;
+        } else {
+            $inst = "";
+        }
+       
+        if(!empty($mes)) {
+            return header("location: ../../index.php?page=g_faltas_vinte_dias&ano=$ano&mes=$mes$inst");
+        } elseif(empty($mes)) {
+            return header("location: ../../index.php?page=g_faltas_trinta_dias&ano=$ano$inst");
+        }
+    }
+
+    public function verificar_ficha_nao_exercicios_faltas1($id_identificacao)
+    {
+        $sql = "SELECT *
+            FROM gfuncao_ficha_nao_exercicio
+            WHERE id_motivo_nao_exercicio = '45020ea3-3043-434d-b244-c1114a532e7a' and id_identificacao = '$id_identificacao'
+        ";
+
+        $dados_exitentes = pg_query($this->db_pgconnect, $sql);
+       
+        if (empty($dados_exitentes)) {
+            return false;
+        } else {
+            return true;
+        }   
+
+    }
+
+
+    public function verificar_ficha_nao_exercicios_faltas($mes_ano_instituicao)
+    {
+        $sql = "SELECT *
+            FROM gfuncao_ficha_nao_exercicio
+            WHERE observacao = '$mes_ano_instituicao'
+        ";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $dados_exitentes = $stmt->rowCount();
+        
+        if ($dados_exitentes == 0) {
+            return true;
+        } else {
+            return false;
+        }   
+    }
+    
+    
+    public function verificar_mes_ano_faltas($mes_ano_instituicao)
+    {
+        $sql = "SELECT *
+            FROM gfuncao_ficha_nao_exercicio
+            WHERE observacao = '$mes_ano_instituicao'
+        ";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll();
+         
+    }
+
+    public function verificar_cargo($id_identificacao)
+    {
+        $sql = "SELECT categoria_cargo
+            FROM view_gestao_das_faltas
+            WHERE id_identificacao = '$id_identificacao' and categoria_cargo notnull
+        ";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    public function set_mes_em_portugues($mes)
+    {
+        switch ($mes) {
+            case 1:
+            echo 'Janeiro';
+            break;
+            case 2:
+            echo 'Fevereiro';
+            break;
+            case 3:
+            echo 'Março';
+            break;
+            case 4:
+            echo 'Abril';
+            break;
+            case 5:
+            echo 'Maio';
+            break;
+            case 6:
+            echo 'Junho';
+            break;
+            case 7:
+            echo 'Julho';
+            break;
+            case 8:
+            echo 'Augusto';
+            break;
+            case 9:
+            echo 'Setembro';
+            break;
+            case 10:
+            echo 'Outobro';
+            break;
+            case 11:
+            echo 'Novembro';
+            break;
+            case 12:
+            echo 'Desembro';
+            break;
+
+            }
+    }
+   
+    public function soma_dias_uteis_falta_id($id_funcionario)
+    {
+        if (empty($_POST['mes_falta'])) {
+            $sql = "SELECT SUM(dias_uteis::numeric) as dias_uteis 
+        from view_gestao_das_faltas WHERE EXTRACT('year' from data_inicio_de_falta)=".$_POST['ano_falta']." and id_identificacao = '$id_funcionario'";
+            
+        }else{
+            $sql = "SELECT SUM(dias_uteis::numeric) as dias_uteis 
+            from view_gestao_das_faltas WHERE EXTRACT('month' from  data_inicio_de_falta) = ".$_POST['mes_falta']." and 
+            EXTRACT('year' from data_inicio_de_falta)=".$_POST['ano_falta']." and id_identificacao = '$id_funcionario'";
+        }
+    
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetch();
+        
+        return $resultado['dias_uteis'];
+    }
+
+    public function soma_dias_falta_uteis($id_funcionario)
+    {
+
+        $sql = "SELECT SUM(dias_uteis::numeric) AS value_sum FROM view_gestao_das_faltas where id_identificacao = '$id_funcionario' ";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetch();
+        
+        echo $resultado['value_sum'];
+    }
+    
+
+    public function get_instituicao()
+    {
+        $sql = "SELECT distinct(instituicao) FROM sigap_foun.lista_colocacao_atual_do_funcionario where instituicao notnull and instituicao <> 'PARA CONFIRMAR'and instituicao <> '-' order by instituicao ASC";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetchAll();
+        
+        return $resultado;
+    }
+    
+    public function busca_ano_mes_instituicao($mes, $ano, $instituicao)
+    {
+        $sql = "SELECT distinct(id_identificacao), nome_pessoal, id_sigap, instituicao, sexo FROM view_gestao_das_faltas WHERE EXTRACT('month' from  data_inicio_de_falta) = $mes and 
+        EXTRACT('year' from data_inicio_de_falta)=$ano AND instituicao LIKE '$instituicao'";
+
+            // var_dump($sql);
+            // die;
+
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $stmt->fetchAll();
+
+        
+        return header("location: ../../index.php?page=g_faltas_client_side");
+    }
+    
+    public function set_dados_busca_mes_ano_falta($table, $thead, $select, $and_condicao, $page, $get_mes_falta, $get_ano_falta, $instituicao_selecionado)
+    {
+        if (empty($get_mes_falta)) {
+            $sql = "SELECT $select FROM $table WHERE EXTRACT('year' from data_inicio_de_falta)=$get_ano_falta $and_condicao AND instituicao LIKE '%$instituicao_selecionado%' ORDER BY dias DESC";
+        } elseif(!empty($get_mes_falta)) {
+            $sql = "SELECT $select FROM $table WHERE EXTRACT('month' from  data_inicio_de_falta) = $get_mes_falta and EXTRACT('year' from data_inicio_de_falta)=$get_ano_falta $and_condicao AND instituicao LIKE '%$instituicao_selecionado%' ORDER BY dias DESC";
+        }
+
+            $stmt = $this->conn->prepare($sql);
+            $stmt->execute();
+            $dados_retorno =  $stmt->fetchAll();
+            $header = explode(',', $thead);
+            $body = explode(',', $select);
+
+            if ($stmt->rowCount() > 0) {
+
+                echo '<h4>Total Funcionário: '. $stmt->rowCount(); 
+
+            $aux = 0;
+            $tabelabody = '';
+            echo '<table id="" class="table table-row-bordered gy-5">';
+            if ($aux == 0) {
+                $tabelahead = '
+                <thead>
+                    <tr class="fw-bolder text-muted">';
+                        foreach ($header as $th) {
+                        $tabelahead .= '<th>' . $th . '</th>';
+                        }
+                        $tabelahead .= '</tr>
+                </thead>';
+                echo $tabelahead;
+            }
+    
+    foreach ($dados_retorno as $dados) {
+
+        $color = ($dados['dias_uteis']>=20) ? "table-danger" : "" ;
+        $hover = ($dados['dias_uteis']>=20) ? ' data-bs-toggle="tooltip" data-bs-placement="top" data-bs-trigger="hover"
+        title="Falta mais de 20 dias"' : '' ;
+        $tabelabody .= '<tbody>';
+        $tabelabody .= '<tr class="clickable-row '.$color.'" data-href="?page=' . $page . '&id_identificacao=' . $dados[$body[0]] . '" '. $hover .'>
+                ';
+                foreach ($body as $col) {
+                if ($body[0] != $col) {
+                $tabelabody .= '<td><a href="#" class="text-dark fw-bolder text-hover-primary d-block fs-6">' . $dados[$col] .
+                        '</a> </td>';
+                }
+                }
+                $tabelabody .= '</tr>';
+
+    $tabelabody .= '<script>
+    jQuery(document).ready(function($) {
+        $(".clickable-row").click(function() {
+            window.location = $(this).data("href");
+        });
+    });
+    </script>';
+
+    $aux = 1;
+
+    }
+    echo $tabelabody;
+    echo '</tbody></table>';
+
+
+    } else {
+    echo '<div class="col-md-12">
+    <div class="alert alert-dismissible bg-success d-flex flex-column flex-sm-row p-5 mb-10">
+        <i class="bi bi bi-check-lg fs-3x me-6" style="color:#ffffff"></i>
+        <div class="d-flex flex-column text-light pe-0 pe-sm-10">
+            <h4 class="mb-2 light">Informação</h4>
+            <span>No mês e ano selecionados não há faltas</span>
+        </div>
+    </div>
+    </div>';
+    }
+    }
+
+    public function get_data_inicio_situacao($id_identificacao)
+    {
+        $sql = "SELECT data_inicio_situacao, id_regime FROM view_ficha_funcao_funcionario WHERE id_identificacao = '$id_identificacao' ";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+    
+
+    // public function set_gestao_faltas($id_funcionario, $data_inicio_falta, $data_fim_falta, $id_tipo_falta, $dias_faltas, $dias_uteis_faltas, $inserido_por, $observacao_falta, $data_documentos, $nome_documentos, $tipo_documentos, $tamanho_documentos, $numero_acto_administrativo, $falta_em_msql, $id_regime)
+    // {
+    
+    //         $data_fim_mes = date("Y-m-t", strtotime($data_inicio_falta));
+            
+    //         if ($data_inicio_falta <= $data_fim_mes && $data_fim_falta > $data_fim_mes ) {
+            
+    //         $data_hahu = new DateTime($data_inicio_falta);
+    //         $data_remata = new DateTime($data_fim_falta);
+    
+    //         $interval = DateInterval::createFromDateString('1 day');
+    //         $period = new DatePeriod($data_hahu, $interval, $data_remata);
+    //         $items = array();
+    //         $items2 = array();
+    
+    //         foreach ($period as $dt) {
+    //             $loron =  $dt->format("Y-m-d") ;
+    
+    //             $lastDateOfMonth = date("Y-m-t", strtotime($loron)); 
+    //             $FirstDateOfMonth = date("Y-m-01", strtotime($loron)); 
+    //             $data_remata_ =  $data_remata->format("Y-m-d") ;
+    //             $data_hahu_ =  $data_hahu->format("Y-m-d") ;
+    
+    //             if ($loron == $FirstDateOfMonth || $loron == $lastDateOfMonth) {
+    //                 $FirstDateOfMonth =  $FirstDateOfMonth;
+    //                 $iniciu = [$FirstDateOfMonth];
+    
+    //                 $lastDateOfMonth =  $lastDateOfMonth;
+    //                 $fim = [$lastDateOfMonth];
+    //                 foreach($fim as $username) {
+    //                     $items[] = $username;
+    //                    }
+                    
+    //                $iniciu = [$FirstDateOfMonth];
+    //                 foreach($iniciu as $user) {
+    //                     $items2[] = $user;
+    //                    }
+    //             }
+    //         }
+    
+    //         $items = array_unique($items);
+            
+    //         $fim = $items;
+           
+    //         $items2 = array_unique($items2);
+            
+    //         $iniciu = $items2;
+    
+    //         foreach ($iniciu as $ini) {
+    //             foreach ($fim as $fi) {
+    
+    //                 if ($data_hahu_ < $ini) {
+    //                     $ini = $ini;
+    //                 } else {
+    //                     $ini = $data_hahu_;
+    //                 }
+                    
+    //                 if ($data_remata_ > $fi) {
+    //                     $fi = $fi;
+    //                 } else {
+    //                     $fi = $data_remata_;
+    //                 }
+    
+    //                 $data_inicio_falta1 = new DateTime($ini);
+    //                 $data_fim_falta1 = new DateTime($fi);
+    
+    //                 $days = $data_inicio_falta1->diff($data_fim_falta1, true)->days;
+    
+    //                 $sundays = intval($days / 7) + ($data_inicio_falta1->format('N') + $days % 7 >= 7);
+    //                 $saturdays = intval($days / 6) + ($data_inicio_falta1->format('N') + $days % 6 >= 6);
+        
+    //                 $interval = date_diff($data_inicio_falta1, $data_fim_falta1);
+                
+    //                 $total_dias =  $interval->format(' %a ');
+                
+    //                 if ($id_regime == 'a01e5f87-afda-4bcf-91f6-57a05a069f46' || $id_regime == '9ed113c3-1fe3-43b7-ba70-dfcdc143700a')
+    //                 {
+    //                     $dias_uteis =  $total_dias;
+    //                 } elseif ($id_regime == '1063e030-05ba-423f-ad73-e895279c007d') {
+    //                     $dias_uteis =  $total_dias - $sundays;
+    //                 } else{
+    //                     $dias_uteis = $saturdays + $sundays;
+    //                     $dias_uteis =  $total_dias - $dias_uteis;
+    //                 }
+    
+    //                 if (date("Y-m-t", strtotime($fi)) == date("Y-m-t", strtotime($ini))) {
+    //                     // echo  'Inicio: '.  $ini . '  '. 'Fim: '. $fi . ' dias uteis ' . $dias_uteis + 1 . ' dias total ' . $total_dias + 1 . '<br><br>';
+    //                     $dias_uteis =$dias_uteis + 1;
+    //                     $total_dias =$total_dias + 1;
+    //                     $sql = "CALL sigap_foun.inserir_gestao_faltas('$id_funcionario', '$ini', '$fi', '$id_tipo_falta',  '$total_dias', '$dias_uteis', '$inserido_por', '$observacao_falta', '$data_documentos', '$nome_documentos', '$tipo_documentos', $tamanho_documentos, '$numero_acto_administrativo', '$falta_em_msql')";
+    //                     pg_query($this->db_pgconnect, $sql);
+    //                 }
+                    
+    //             }
+    //         }
+    
+    //         if ($data_remata_ == date("Y-m-01", strtotime($data_remata_))) {
+    //             // echo  'Inicio: '.  $data_remata_ . '  '. 'Fim: '. $data_remata_ . ' dias uteis ' . '1' . ' dias total ' . '1' . '<br><br>';
+    //             $sql = "CALL sigap_foun.inserir_gestao_faltas('$id_funcionario', '$data_remata_', '$data_remata_', '$id_tipo_falta',  '1', '1', '$inserido_por', '$observacao_falta', '$data_documentos', '$nome_documentos', '$tipo_documentos', $tamanho_documentos, '$numero_acto_administrativo', '$falta_em_msql')";
+    //             pg_query($this->db_pgconnect, $sql);
+    //         }
+    
+    //     }
+    //     else {
+    //         $sql = "CALL sigap_foun.inserir_gestao_faltas('$id_funcionario', '$data_inicio_falta', '$data_fim_falta', '$id_tipo_falta',  '$dias_faltas', '$dias_uteis_faltas', '$inserido_por', '$observacao_falta', '$data_documentos', '$nome_documentos', '$tipo_documentos', $tamanho_documentos, '$numero_acto_administrativo', '$falta_em_msql')";
+                    
+    //                 pg_query($this->db_pgconnect, $sql);
+    //                 pg_close($this->db_pgconnect);
+    //     }
+      
+    //     Flasher::setFlash('Os dados das faltas inserido ', 'com sucesso', 'success');    
+    //     header("location: ../../index.php?page=g_faltas_gerir_funcionarios&id_identificacao=$id_funcionario");
+    // }
+    
+    public function set_gestao_faltas($id_funcionario, $data_inicio_falta, $data_fim_falta, $id_tipo_falta, $dias_faltas, $dias_uteis_faltas, $inserido_por, $observacao_falta, $data_documentos, $nome_documentos, $tipo_documentos, $tamanho_documentos, $numero_acto_administrativo, $falta_em_msql, $id_regime)
+    {
+            
+            $sql = "CALL sigap_foun.inserir_gestao_faltas('$id_funcionario', '$data_inicio_falta', '$data_fim_falta', '$id_tipo_falta',  '$dias_faltas', '$dias_uteis_faltas', '$inserido_por', '$observacao_falta', '$data_documentos', '$nome_documentos', '$tipo_documentos', $tamanho_documentos, '$numero_acto_administrativo', '$falta_em_msql')";
+                    
+                    pg_query($this->db_pgconnect, $sql);
+                    pg_close($this->db_pgconnect);
+        
+      
+        Flasher::setFlash('Os dados das faltas inserido ', 'com sucesso', 'success');    
+        header("location: ../../index.php?page=g_faltas_gerir_funcionarios&id_identificacao=$id_funcionario");
+    }
+
+
+    public function get_documentos_gfaltas($id)
+    {
+
+        pg_query($this->db_pgconnect, 'SET search_path TO arquivos');
+
+        $query = "SELECT  data_gfaltas_arquivo, nome_gfaltas_arquivo, tipo_gfaltas_arquivo FROM arquivos.gfaltas_arquivo WHERE id_falta = '$id'";
+
+        $res = pg_query($this->db_pgconnect, $query) or die(pg_last_error($this->db_pgconnect));
+
+        $arquivo = pg_fetch_array($res, null, PGSQL_ASSOC);
+
+        header('Content-type: ' . $arquivo["tipo_gfaltas_arquivo"]);
+        echo pg_unescape_bytea($arquivo["data_gfaltas_arquivo"]);
+    }
+
+    public function alterar_gestao_falta($id_faltas, $id_funcionario, $data_inicio_falta, $data_fim_falta, $id_tipo_falta, $dias_faltas, $dias_uteis_faltas, $alterado_por, $observacao_falta, $data_documentos, $nome_documentos, $tipo_documentos, $tamanho_documentos, $numero_acto_administrativo, $falta_em_msql)
+    {
+        $dt = new DateTime("now", new DateTimeZone('Asia/Dili'));
+        $t = time();
+
+        $sql = "UPDATE sigap_foun.gfalta_faltas
+        SET id_tipo_faltas='$id_tipo_falta', data_inicio_de_falta='$data_inicio_falta', data_fim_de_falta='$data_fim_falta', dias='$dias_faltas', dias_uteis='$dias_uteis_faltas', falta_ultima_alteracao_em='$t', falta_ultima_alteracao_por='$alterado_por', falta_ultima_alteracao_em_msql='$falta_em_msql', descricao='$observacao_falta', acto_administrativo='$numero_acto_administrativo'
+        WHERE id_faltas = '$id_faltas';";
+
+            $query = "SELECT  data_gfaltas_arquivo, nome_gfaltas_arquivo, tipo_gfaltas_arquivo FROM arquivos.gfaltas_arquivo WHERE id_falta = '$id_faltas'";
+
+            $stmt = $this->conn->prepare($query);
+            $stmt->execute();
+  
+            if ($stmt->rowCount() > 0)
+            {
+                $sql2 = "UPDATE arquivos.gfaltas_arquivo SET data_gfaltas_arquivo='$data_documentos',  nome_gfaltas_arquivo='$nome_documentos', tipo_gfaltas_arquivo = '$tipo_documentos', tamanho_gfaltas_arquivo='$tamanho_documentos', gfaltas_arquivo_ultima_alterado_em='$t', gfaltas_arquivo_alterado_em_msql = '$falta_em_msql', gfaltas_arquivo_ultima_alterado_por='$alterado_por' WHERE id_falta = '$id_faltas';";
+            }  else {
+                $tamanho_documentos = (empty($tamanho_documentos)) ? 0 : $tamanho_documentos;
+                $sql2 = "INSERT INTO arquivos.gfaltas_arquivo(data_gfaltas_arquivo, nome_gfaltas_arquivo, tipo_gfaltas_arquivo, tamanho_gfaltas_arquivo, id_falta, gfaltas_arquivo_inserido_em, gfaltas_arquivo_inserido_por, gfaltas_arquivo_inserido_em_msql)
+                VALUES ('$data_documentos', '$nome_documentos', '$tipo_documentos', '$tamanho_documentos', '$id_faltas', $t, '$alterado_por', '$falta_em_msql');";
+            }
+
+        $this->conn->exec($sql);
+        $this->conn->exec($sql2);
+
+        Flasher::setFlash('Os dados das faltas alterado ', 'com sucesso', 'success');    
+        header("location: ../../index.php?page=g_faltas_gerir_funcionarios&id_identificacao=$id_funcionario");
+    }
+    
+    public function get_bytea_to_hex($id_faltas)
+    {
+
+        $sql = "SELECT encode(data_gfaltas_arquivo::bytea, 'hex') AS data_falta FROM arquivos.gfaltas_arquivo WHERE id_falta='$id_faltas';";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetch();
+        
+        return $resultado['data_falta'];
+    }
+
+    public function get_bytea_to_hex1($id_campo, $data_bytea, $tabela, $id)
+    {
+        $sql = "SELECT encode($data_bytea::bytea, 'hex') AS data_bytea FROM $tabela WHERE $id_campo='$id';";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        $resultado =  $stmt->fetch();
+        
+        return $resultado['data_bytea'];
+    }
+    
+    public function detalho_gestao_faltas($id_faltas)
+    {
+        $sql = $this->conn->prepare("SELECT * FROM sigap_foun.view_gestao_das_faltas
+        WHERE id_faltas = '$id_faltas';");
+        $sql->execute();
+        return $sql->fetchAll();
+    }
+    
+    public function detalho_gestao_faltas_completo()
+    {
+        $sql = $this->conn->prepare("SELECT * FROM sigap_foun.view_gestao_das_faltas;");
+        $sql->execute();
+        return $sql->rowCount();
+    }
+
+    public function controlo_desabilitar_ficha_funcao($tabela, $alterado_por, $alterado_em, $estado, $id_ficha, $id_funcionario)
+    {
+        $sql = "UPDATE $tabela SET $alterado_por , $alterado_em, $estado
+        WHERE $id_ficha AND $id_funcionario";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        echo "Ficha Função desabilitar com sucesso";
+    }
+
+    public function tipo_de_faltas_insert($tipo_de_faltas, $descricao_tipo_de_faltas, $tipo_de_faltas_inserido_por, $tipo_de_faltas_inserido_em, $tipo_falta_inserido_em_msql, $tipo_falta_acto_administrativo)
+    {
+        $sql = "INSERT INTO sigap_foun.gfalta_tipo_de_faltas(
+            tipo_faltas, descricao, tipo_falta_inserido_em, tipo_falta_inserido_por, tipo_falta_inserido_em_msql, tipo_falta_acto_administrativo)
+            VALUES ('$tipo_de_faltas', '$descricao_tipo_de_faltas', $tipo_de_faltas_inserido_em, '$tipo_de_faltas_inserido_por', '$tipo_falta_inserido_em_msql', '$tipo_falta_acto_administrativo');";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+
+        Flasher::setFlash('O tipo da falta inserido ', 'com sucesso', 'success'); 
+        header("location: ../../index.php?page=g_tipo_de_faltas");
+    }
+    
+    public function tipo_de_faltas_alterar($id_tipo_faltas, $tipo_faltas, $descricao, $tipo_falta_acto_administrativo, $tipo_falta_ultima_alteracao_por, $tipo_falta_ultima_alteracao_em_msql, $tipo_falta_ultima_alteracao_em)
+    {
+        $sql = "UPDATE sigap_foun.gfalta_tipo_de_faltas
+        SET tipo_faltas='$tipo_faltas', descricao='$descricao', tipo_falta_ultima_alteracao_em=$tipo_falta_ultima_alteracao_em, tipo_falta_ultima_alteracao_por='$tipo_falta_ultima_alteracao_por', tipo_falta_ultima_alteracao_em_msql='$tipo_falta_ultima_alteracao_em_msql', tipo_falta_acto_administrativo='$tipo_falta_acto_administrativo'
+        WHERE id_tipo_faltas = '$id_tipo_faltas';";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+
+        Flasher::setFlash('O tipo da falta alterado ', 'com sucesso', 'success'); 
+        header("location: ../../index.php?page=g_tipo_de_faltas");
+    }
+
+    public function desabilitar_falta($tabela, $alterado_por, $alterado_em, $estado, $id_ficha, $t)
+    {
+        $sql = "UPDATE $tabela SET $alterado_por , $alterado_em, $estado, $t
+        WHERE $id_ficha";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute();
+        echo "Ficha Função desabilitar com sucesso";
+    }
+}
